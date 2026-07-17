@@ -14,7 +14,8 @@ import dataclasses
 class ModelConfig:
     name: str
     num_layers: int
-    num_heads: int
+    num_attention_heads: int
+    num_key_value_heads: int
     hidden_size: int
     intermediate_size: int
     attention_bias: False
@@ -27,7 +28,8 @@ MODEL_CFGS = {
         ModelConfig(
             name='llama-2-7b',
             num_layers=32,
-            num_heads=32,
+            num_attention_heads=32,
+            num_key_value_heads=32,
             hidden_size=4096,
             intermediate_size=11008,
             attention_bias=False,
@@ -37,7 +39,8 @@ MODEL_CFGS = {
         ModelConfig(
             name='llama-3.1-8b',
             num_layers=32,
-            num_heads=32,
+            num_attention_heads=32,
+            num_key_value_heads=8,
             hidden_size=4096,
             intermediate_size=14336,
             attention_bias=False,
@@ -91,7 +94,8 @@ def get_model_quantized(name, model_cfg):
         name,
         LlamaConfig(
             hidden_size=model_cfg.hidden_size,
-            num_heads=model_cfg.num_heads,
+            num_attention_heads=model_cfg.num_attention_heads,
+            num_key_value_heads=model_cfg.num_key_value_heads,
             intermediate_size=model_cfg.intermediate_size,
             num_hidden_layers=model_cfg.num_layers,
         )).to(model_cfg.device)

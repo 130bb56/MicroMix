@@ -8,7 +8,8 @@ from transformers.models.llama.modeling_llama import (ACT2FN,
     LlamaMLP,
     PreTrainedModel,
     rotate_half,
-    LlamaRotaryEmbedding
+    LlamaRotaryEmbedding,
+    repeat_kv,
 )
 
 from transformers import DynamicCache
@@ -141,8 +142,11 @@ class QLlamaAttention(nn.Module):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
-        self.num_heads = config.num_heads
+        self.num_heads = config.num_attention_heads
+        self.num_key_value_heads = config.num_key_value_heads
+        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.head_dim = self.hidden_size // self.num_heads
+        self.key_value_hidden_size = self.num_key_value_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
         
         self.layer_idx = i
@@ -159,12 +163,12 @@ class QLlamaAttention(nn.Module):
             p6_num=p6_nums[nameTemplate.format(i, 'self_attn', 'q_proj', 'input')],
         )
         self.k_proj = QLinearLayer(
-            in_features=self.hidden_size, out_features=self.hidden_size, bias=config.attention_bias,
+            in_features=self.hidden_size, out_features=self.key_value_hidden_size, bias=config.attention_bias,
             p8_num=p8_nums[nameTemplate.format(i, 'self_attn', 'k_proj', 'input')],
             p6_num=p6_nums[nameTemplate.format(i, 'self_attn', 'k_proj', 'input')],
         )
         self.v_proj = QLinearLayer(
-            in_features=self.hidden_size, out_features=self.hidden_size, bias=config.attention_bias,
+            in_features=self.hidden_size, out_features=self.key_value_hidden_size, bias=config.attention_bias,
             p8_num=p8_nums[nameTemplate.format(i, 'self_attn', 'v_proj', 'input')],
             p6_num=p6_nums[nameTemplate.format(i, 'self_attn', 'v_proj', 'input')],
         )
@@ -185,8 +189,8 @@ class QLlamaAttention(nn.Module):
     
     
         query_states = self.q_proj(hidden_states).view(bsz, self.num_heads, q_len, self.head_dim).contiguous()
-        key_states = self.k_proj(hidden_states).view(bsz, self.num_heads, q_len, self.head_dim).contiguous()
-        value_states = self.v_proj(hidden_states).view(bsz, self.num_heads, q_len, self.head_dim).contiguous()
+        key_states = self.k_proj(hidden_states).view(bsz, self.num_key_value_heads, q_len, self.head_dim).contiguous()
+        value_states = self.v_proj(hidden_states).view(bsz, self.num_key_value_heads, q_len, self.head_dim).contiguous()
         
         cos, sin = self.rotary_emb(value_states, position_ids=position_ids)
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
@@ -195,13 +199,16 @@ class QLlamaAttention(nn.Module):
             cache_kwargs = {"sin": sin, "cos": cos}
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
+        key_states = repeat_kv(key_states, self.num_key_value_groups)
+        value_states = repeat_kv(value_states, self.num_key_value_groups)
+
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             query_states,
             key_states,
             value_states,
             attn_mask=None,
             dropout_p=0.0,
-            is_causal=True
+            is_causal=q_len > 1
         ).contiguous()
         
         
@@ -376,15 +383,14 @@ class LlamaModel(LlamaPreTrainedModel):
         self.cache_dtype = "bfloat16"
         self.config = config
         self.page_len = 128
-        self.head_dim = config.hidden_size // config.num_heads
+        self.head_dim = config.hidden_size // config.num_attention_heads
         
     def build_cache(self, batch_size, page_size, max_length):
         device = 'cuda'
         dtype = self.cache_dtype
         
-        num_heads = self.config.num_heads
-        model_dim = self.config.hidden_size
-        head_dim = model_dim // num_heads
+        num_heads = self.config.num_key_value_heads
+        head_dim = self.head_dim
         disable_quant = self.cache_dtype == "float16"
         return MultiLayerPagedKVCache4Bit(
             batch_size=batch_size,
@@ -454,4 +460,3 @@ class LlamaForCausalLM(LlamaModel):
         torch.cuda.nvtx.range_pop()
         torch.cuda.nvtx.range_pop()
         return past_key_value
-

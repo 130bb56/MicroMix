@@ -11,9 +11,13 @@ Please make sure that [CUDA 12.8](https://developer.nvidia.com/cuda-12-8-1-downl
 ```bash
 git clone --recurse-submodules https://github.com/lwy2020/MicroMix.git
 cd MicroMix
+git switch --track origin/micromix
+git submodule update --init --recursive
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
 ```
+
+The ICLR 2026 implementation and its complete efficiency benchmark are maintained on the `micromix` branch. Run the commands below from the repository root after switching to `micromix`; the `main` branch is a separate development line and is not interchangeable with this benchmark setup.
 
 ## 2. Usage
 
@@ -34,7 +38,9 @@ bash test.sh /PATH/TO/YOUR/MODEL/
 ```
 
 ## 3. Efficiency Evaluation
-MicroMix efficiency:
+Run preprocessing in Section 2.1 and build the kernels in Section 2.2 first. The Llama 3.1 configuration uses 32 attention heads and 8 key/value heads.
+
+MicroMix efficiency (run from the repository root on the `micromix` branch):
 ```bash
 python benchmarks/benchmark_e2e_micromix.py --model 'llama-3.1-8b' --batch_size 8 --prefill_seq_len 2048
 ```
